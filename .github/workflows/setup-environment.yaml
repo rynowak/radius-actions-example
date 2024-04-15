@@ -1,0 +1,52 @@
+name: Setup Environment
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment name to create/update.'
+        required: true
+        default: 'default'
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+  pull-requests: write
+  id-token: write
+concurrency:
+  group: "${{ github.workflow }}"
+jobs:
+  setup_environment:
+    runs-on: ubuntu-latest
+    environment: Sample
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Test Azure login (because it LIES!!!)
+        run: |
+          az group show --name ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Get Kubernetes Credentials
+        run: |
+          az aks get-credentials \
+            --name ${{ secrets.AZURE_AKS_CLUSTER_NAME }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --overwrite-existing
+      - name: Install Radius CLI
+        run: |
+          wget -q "https://raw.githubusercontent.com/radius-project/radius/main/deploy/install.sh" -O - | /bin/bash
+          rad version
+      - name: Check Radius is installed on cluster
+        run: |
+          rad group list || { echo "Radius is not installed. Please install Radius before using this workflow."; exit 1;}
+      - name: Configure environment
+        run: |
+          rad group create ${{ github.event.inputs.environment }}
+          rad env create ${{ github.event.inputs.environment }} --group ${{ github.event.inputs.environment }}
+          rad workspace create kubernetes ${{ github.event.inputs.environment }} -e ${{ github.event.inputs.environment }} -g ${{ github.event.inputs.environment }}
+          rad deploy env.bicep --parameters name=${{ github.event.inputs.environment }}

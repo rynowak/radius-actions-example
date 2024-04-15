@@ -1,0 +1,59 @@
+name: Deploy Application
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment name to use for deployment.'
+        required: true
+        default: 'default'
+      application:
+        description: 'Application name to use for the application.'
+        required: true
+        default: 'radius-demo'
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+  pull-requests: write
+  id-token: write
+concurrency:
+  group: "${{ github.workflow }}"
+jobs:
+  deploy_application:
+    runs-on: ubuntu-latest
+    environment: Sample
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Test Azure login (because it LIES!!!)
+        run: |
+          az group show --name ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Get Kubernetes Credentials
+        run: |
+          az aks get-credentials \
+            --name ${{ secrets.AZURE_AKS_CLUSTER_NAME }} \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --overwrite-existing
+      - name: Install Radius CLI
+        run: |
+          wget -q "https://raw.githubusercontent.com/radius-project/radius/main/deploy/install.sh" -O - | /bin/bash
+          rad version
+      - name: Check Radius is installed on cluster
+        run: |
+          rad group list || { echo "Radius is not installed. Please install Radius before using this workflow."; exit 1;}
+      - name: Check environment exists
+        run: |
+          rad env show -e ${{ github.event.inputs.environment }} -g ${{ github.event.inputs.environment }} || { echo "Environment does not exist. Please create the environment before using this workflow."; exit 1;}
+      - name: Run rad deploy
+        run: |
+          rad deploy app.bicep \
+            -e ${{ github.event.inputs.environment }} \
+            -a ${{ github.event.inputs.application }} \
+            -g ${{ github.event.inputs.environment }}
